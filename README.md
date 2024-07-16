@@ -1,7 +1,7 @@
 Steps to reproduce
 ==================
 
-Clone repository and fetch the ONNX model:
+Clone repository and fetch the serialized TensorRT engine:
 
 ```bash
 git clone https://github.com/sergeev917/jetson-nano-jetpack4.6-repro.git
@@ -16,8 +16,8 @@ g++ -O2 -ggdb2 app.cc -o app -I /usr/local/cuda-10.2/include -L /usr/local/cuda-
 ```
 
 Run the built application and observe the problem. Note that the application
-loads `model.onnx` from the working directory, so the application must be
-executed from the repository root directory.
+loads `model.engine` (serialized TensorRT engine) from the working directory,
+so the application must be executed from the repository root directory.
 
 ```bash
 ./app
@@ -25,27 +25,25 @@ executed from the repository root directory.
 
 The produced output looks like:
 ```
-[MemUsageChange] Init CUDA: CPU +230, GPU +0, now: CPU 304, GPU 2368 (MiB)
-...
-[MemUsageChange] TensorRT-managed allocation in building engine: CPU +27, GPU +64, now: CPU 27, GPU 64 (MiB)
-[MemUsageChange] Init CUDA: CPU +0, GPU +0, now: CPU 1111, GPU 3209 (MiB)
+[MemUsageChange] Init CUDA: CPU +229, GPU +0, now: CPU 311, GPU 2711 (MiB)
 Loaded engine size: 33 MiB
 Using cublas as a tactic source
-[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +0, GPU +0, now: CPU 1111, GPU 3209 (MiB)
+[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +159, GPU +163, now: CPU 470, GPU 2875 (MiB)
 Using cuDNN as a tactic source
-[MemUsageChange] Init cuDNN: CPU +1, GPU +0, now: CPU 1112, GPU 3209 (MiB)
-Deserialization required 56195 microseconds.
+[MemUsageChange] Init cuDNN: CPU +241, GPU +237, now: CPU 711, GPU 3112 (MiB)
+Deserialization required 3436767 microseconds.
 [MemUsageChange] TensorRT-managed allocation in engine deserialization: CPU +0, GPU +33, now: CPU 0, GPU 33 (MiB)
 Using cublas as a tactic source
-[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +0, GPU +0, now: CPU 1111, GPU 3209 (MiB)
+[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +158, GPU +0, now: CPU 710, GPU 3112 (MiB)
 Using cuDNN as a tactic source
-[MemUsageChange] Init cuDNN: CPU +1, GPU +0, now: CPU 1112, GPU 3209 (MiB)
+[MemUsageChange] Init cuDNN: CPU +1, GPU +0, now: CPU 711, GPU 3112 (MiB)
 Total per-runner device persistent memory is 8731648
 Total per-runner host persistent memory is 13152
 Allocated activation device memory of size 344576
 [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +8, now: CPU 0, GPU 41 (MiB)
 1: [genericReformat.cu::executeMemcpy::1334] Error Code 1: Cuda Runtime (invalid argument)
-app: app.cc:154: int main(): Assertion `ret == cudaSuccess' failed.
+app: app.cc:98: int main(): Assertion `ret == cudaSuccess' failed.
+Aborted (core dumped)
 ```
 
 With gdb some internal exceptions can be traced:
@@ -57,12 +55,30 @@ gdb -ex 'catch throw' -ex 'r' ./app
 The results looks like the following:
 
 ```
+Catchpoint 1 (throw)
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/aarch64-linux-gnu/libthread_db.so.1".
+[New Thread 0x7fa9ef3c80 (LWP 23327)]
+[MemUsageChange] Init CUDA: CPU +229, GPU +0, now: CPU 311, GPU 2738 (MiB)
+Loaded engine size: 33 MiB
+Using cublas as a tactic source
+[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +159, GPU +161, now: CPU 470, GPU 2899 (MiB)
+Using cuDNN as a tactic source
+[MemUsageChange] Init cuDNN: CPU +241, GPU +246, now: CPU 711, GPU 3145 (MiB)
+Deserialization required 3485260 microseconds.
+[MemUsageChange] TensorRT-managed allocation in engine deserialization: CPU +0, GPU +33, now: CPU 0, GPU 33 (MiB)
+Using cublas as a tactic source
+[MemUsageChange] Init cuBLAS/cuBLASLt: CPU +158, GPU +0, now: CPU 710, GPU 3146 (MiB)
+Using cuDNN as a tactic source
+[MemUsageChange] Init cuDNN: CPU +1, GPU +0, now: CPU 711, GPU 3146 (MiB)
+Total per-runner device persistent memory is 8731648
+Total per-runner host persistent memory is 13152
+Allocated activation device memory of size 344576
 [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +8, now: CPU 0, GPU 41 (MiB)
 
-Thread 1 "main" hit Catchpoint 1 (exception thrown), 0x0000007fadbf1f20 in __cxa_throw () from /usr/lib/aarch64-linux-gnu/libstdc++.so.6
-(gdb)
+Thread 1 "app" hit Catchpoint 1 (exception thrown), 0x0000007fadea0f20 in __cxa_throw () from /usr/lib/aarch64-linux-gnu/libstdc++.so.6
 (gdb) bt
-#0  0x0000007fadbf1f20 in __cxa_throw () from /usr/lib/aarch64-linux-gnu/libstdc++.so.6
+#0  0x0000007fadea0f20 in __cxa_throw () from /usr/lib/aarch64-linux-gnu/libstdc++.so.6
 #1  0x0000007fae7ce82c in nvinfer1::Lobber<nvinfer1::CudaRuntimeError>::operator()(char const*, char const*, int, int, nvinfer1::ErrorCode, char const*) () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
 #2  0x0000007faebbdbc8 in ?? () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
 #3  0x0000007faebbdc28 in ?? () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
@@ -70,60 +86,29 @@ Thread 1 "main" hit Catchpoint 1 (exception thrown), 0x0000007fadbf1f20 in __cxa
 #5  0x0000007faed55c1c in ?? () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
 #6  0x0000007faeda2720 in ?? () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
 #7  0x0000007faeda38e0 in ?? () from /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
-#8  0x0000005555556950 in nvinfer1::IExecutionContext::executeV2 (this=<optimized out>, bindings=0x7fffffec98) at /usr/include/aarch64-linux-gnu/NvInferRuntime.h:2275
-(gdb) continue
+#8  0x000000555555656c in nvinfer1::IExecutionContext::executeV2 (this=<optimized out>, bindings=0x7fffffec28) at /usr/include/aarch64-linux-gnu/NvInferRuntime.h:2275
+(gdb) c
 Continuing.
 1: [genericReformat.cu::executeMemcpy::1334] Error Code 1: Cuda Runtime (invalid argument)
-app: app.cc:154: int main(): Assertion `ret == cudaSuccess' failed.
+app: app.cc:98: int main(): Assertion `ret == cudaSuccess' failed.
 
-Thread 1 "main" received signal SIGABRT, Aborted.
+Thread 1 "app" received signal SIGABRT, Aborted.
 ```
 
 While `dmesg` shows the following:
 
 ```
-[18364.509525] ---- mlocks ----
-
-[18364.509563] ---- syncpts ----
-[18364.509603] id 8 (gm20b_507) min 1694676 max 1694676 refs 1 (previous client : gm20b_507)
-[18364.509620] id 9 (gm20b_506) min 751130 max 751132 refs 1 (previous client : gm20b_506)
-[18364.509639] id 11 (gm20b_505) min 148294 max 148296 refs 1 (previous client : gm20b_505)
-[18364.509656] id 12 (gm20b_504) min 36494 max 36494 refs 1 (previous client : gm20b_504)
-[18364.509673] id 13 (gm20b_503) min 186854 max 186856 refs 1 (previous client : gm20b_503)
-
-[....]
-
-               ---- host syncpt thresh ----
-
-[18364.510241] syncpt_int_thresh_thresh_0(0) = 1
-[18364.510260] syncpt_int_thresh_thresh_0(9) = 751132
-[18364.510273] syncpt_int_thresh_thresh_0(11) = 148296
-[18364.510285] syncpt_int_thresh_thresh_0(13) = 186856
-[18364.510447] gm20b pbdma 0:
-[18364.510467] id: 4 (tsg), next_id: 4 (tsg) chan status: invalid
-[18364.510505] PBDMA_PUT: 0000001f00209ee8 PBDMA_GET: 0000001f00209ed0 GP_PUT: 00000d3e GP_GET: 00000d3e FETCH: 00000d3e HEADER: 20111b08
-               HDR: 20022060 SHADOW0: 0032a3f4 SHADOW1: 00034e01
-
-[18364.510530] gm20b eng 0:
-[18364.510546] id: 4 (tsg), next_id: 4 (tsg), ctx status: valid
-[18364.510554] faulted
-[18364.510563] busy
-
-[18364.510583] gm20b eng 1:
-[18364.510597] id: 5 (tsg), next_id: 5 (tsg), ctx status: valid
-
-[....]
-
-[18364.512335] nvgpu: 57000000.gpu gk20a_fifo_handle_mmu_fault_locked:1723 [ERR]   mmu fault on engine 0, engine subid 0 (gpc), client 1 (t1 0), addr 0x7f87cf3000, type 3 (va limit viol), access_type 0x00000001,inst_ptr 0x7feccf000
-[18364.537265] nvgpu: 57000000.gpu  gk20a_fifo_set_ctx_mmu_error_tsg:1543 [ERR]  TSG 4 generated a mmu fault
-[18364.546873] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 507 generated a mmu fault
-[18364.557045] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 507
-[18364.567460] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 506 generated a mmu fault
-[18364.577660] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 506
-[18364.588149] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 505 generated a mmu fault
-[18364.598270] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 505
-[18364.608556] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 504 generated a mmu fault
-[18364.618665] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 504
+....
+[418034.716376] nvgpu: 57000000.gpu gk20a_fifo_handle_mmu_fault_locked:1723 [ERR]   mmu fault on engine 0, engine subid 0 (gpc), client 4 (t1 1), addr 0x7fadf9d000, type 3 (va limit viol), access_type 0x00000001,inst_ptr 0x7fe431000
+[418034.738271] nvgpu: 57000000.gpu  gk20a_fifo_set_ctx_mmu_error_tsg:1543 [ERR]  TSG 4 generated a mmu fault
+[418034.747952] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 507 generated a mmu fault
+[418034.758141] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 507
+[418034.768554] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 506 generated a mmu fault
+[418034.778761] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 506
+[418034.789151] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 505 generated a mmu fault
+[418034.799370] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 505
+[418034.809782] nvgpu: 57000000.gpu   gk20a_fifo_set_ctx_mmu_error_ch:1532 [ERR]  channel 504 generated a mmu fault
+[418034.820014] nvgpu: 57000000.gpu   nvgpu_set_error_notifier_locked:137  [ERR]  error notifier set to 31 for ch 504
 ```
 
 Versions of packages:
